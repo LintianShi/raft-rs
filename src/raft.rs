@@ -1380,15 +1380,8 @@ impl<T: Storage> Raft<T> {
                 if m.get_msg_type() == MessageType::MsgAppend
                     || m.get_msg_type() == MessageType::MsgHeartbeat
                     || m.get_msg_type() == MessageType::MsgSnapshot
-                    || m.get_msg_type() == MessageType::MsgGroupBroadcast
+                    || m.get_msg_type() == MessageType::MsgGroupBroadcast && self.follower_repl
                 {
-                    if m.get_msg_type() == MessageType::MsgGroupBroadcast && !self.follower_repl {
-                        warn!(
-                            self.logger,
-                            "received a MsgGroupBroadcast from {from} while follower replication is disabled",
-                            from = m.from;
-                        );
-                    }
                     self.become_follower(m.term, m.from);
                 } else {
                     self.become_follower(m.term, INVALID_ID);
@@ -1398,7 +1391,7 @@ impl<T: Storage> Raft<T> {
             if (self.check_quorum || self.pre_vote)
                 && (m.get_msg_type() == MessageType::MsgHeartbeat
                     || m.get_msg_type() == MessageType::MsgAppend
-                    || m.get_msg_type() == MessageType::MsgGroupBroadcast)
+                    || m.get_msg_type() == MessageType::MsgGroupBroadcast && self.follower_repl)
             {
                 // We have received messages from a leader at a lower term. It is possible
                 // that these messages were simply delayed in the network, but this could
@@ -2539,7 +2532,10 @@ impl<T: Storage> Raft<T> {
                             aggressively: false,
                         }),
                     );
-                    if self.raft_log.match_term(forward.get_index(), forward.get_log_term()) {
+                    if self
+                        .raft_log
+                        .match_term(forward.get_index(), forward.get_log_term())
+                    {
                         let mut m_append = Message::default();
                         m_append.to = forward.get_to();
                         m_append.from = m.get_from();
@@ -2549,7 +2545,13 @@ impl<T: Storage> Raft<T> {
                         m_append.set_entries(ents.unwrap().into());
                         m_append.commit = m.get_commit();
                         m_append.commit_term = m.get_commit_term();
-                        info!(self.logger, "Peer {} forward MsgAppend from {} to {}", agent_id, m_append.from, m_append.to);
+                        debug!(
+                            self.logger,
+                            "Peer {} forward MsgAppend from {} to {}",
+                            agent_id,
+                            m_append.from,
+                            m_append.to
+                        );
                         self.r.send(m_append, &mut self.msgs)
                     } else {
                         warn!(
