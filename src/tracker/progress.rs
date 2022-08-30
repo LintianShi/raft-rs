@@ -206,7 +206,7 @@ impl Progress {
     /// Determine whether progress is in the Replicate state;
     #[inline]
     pub fn is_replicate_state(&self) -> bool {
-        return self.state == ProgressState::Replicate;
+        self.state == ProgressState::Replicate
     }
 
     /// Determine whether progress is paused.

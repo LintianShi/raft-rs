@@ -2518,11 +2518,12 @@ impl<T: Storage> Raft<T> {
         if self.try_append_entries(m) {
             // If the agent fails to append entries from the leader,
             // the agent cannot forward MsgAppend.
-            let agent_id = m.get_to();
             for forward in m.get_forwards() {
-                // Dest should be in the cluster.
-                if self.prs().get(forward.get_to()).is_some() {
-                    // Fetch log entries from the forward.index to the last index of log.
+                // Fetch log entries from the forward.index to the last index of log.
+                if self
+                    .raft_log
+                    .match_term(forward.get_index(), forward.get_log_term())
+                {
                     let ents = self.raft_log.entries(
                         forward.get_index() + 1,
                         self.max_msg_size,
@@ -2532,37 +2533,38 @@ impl<T: Storage> Raft<T> {
                             aggressively: false,
                         }),
                     );
-                    if self
-                        .raft_log
-                        .match_term(forward.get_index(), forward.get_log_term())
-                    {
-                        let mut m_append = Message::default();
-                        m_append.to = forward.get_to();
-                        m_append.from = m.get_from();
-                        m_append.set_msg_type(MessageType::MsgAppend);
-                        m_append.index = forward.get_index();
-                        m_append.log_term = forward.get_log_term();
-                        m_append.set_entries(ents.unwrap().into());
-                        m_append.commit = m.get_commit();
-                        m_append.commit_term = m.get_commit_term();
-                        debug!(
-                            self.logger,
-                            "Peer {} forward MsgAppend from {} to {}",
-                            agent_id,
-                            m_append.from,
-                            m_append.to
-                        );
-                        self.r.send(m_append, &mut self.msgs)
-                    } else {
-                        warn!(
-                            self.logger,
-                            "The agent's log does not match with index {} log term {} in forward message",
-                            forward.get_index(),
-                            forward.get_log_term()
-                        );
-                    }
+
+                    let mut m_append = Message::default();
+                    m_append.to = forward.get_to();
+                    m_append.from = m.get_from();
+                    m_append.set_msg_type(MessageType::MsgAppend);
+                    m_append.index = forward.get_index();
+                    m_append.log_term = forward.get_log_term();
+                    m_append.set_entries(ents.unwrap().into());
+                    m_append.commit = m.get_commit();
+                    m_append.commit_term = m.get_commit_term();
+                    self.r.send(m_append, &mut self.msgs)
+                } else {
+                    warn!(
+                        self.logger,
+                        "The agent's log does not match with index {} log term {} in forward message to peer {}.",
+                        forward.get_index(),
+                        forward.get_log_term(),
+                        forward.get_to()
+                    );
                 }
             }
+        } else {
+            debug!(
+                self.logger,
+                "The agent rejects append [logterm: {msg_log_term}, index: {msg_index}] \
+                from {from}",
+                msg_log_term = m.log_term,
+                msg_index = m.index,
+                from = m.from;
+                "index" => m.index,
+                "logterm" => ?self.raft_log.term(m.index),
+            );
         }
     }
 
@@ -2994,6 +2996,6 @@ impl<T: Storage> Raft<T> {
                 return true;
             }
         }
-        return false;
+        false
     }
 }
