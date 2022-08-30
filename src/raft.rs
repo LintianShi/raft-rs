@@ -2513,8 +2513,8 @@ impl<T: Storage> Raft<T> {
         self.try_append_entries(m);
     }
 
-    /// For a broadcast, append entries to onw log and forward MsgAppend to other dest.
-    pub fn handle_group_broadcast(&mut self, m: &Message) {
+    // For a broadcast, append entries to onw log and forward MsgAppend to other dest.
+    fn handle_group_broadcast(&mut self, m: &Message) {
         if self.try_append_entries(m) {
             // If the agent fails to append entries from the leader,
             // the agent cannot forward MsgAppend.
