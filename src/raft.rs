@@ -2588,17 +2588,42 @@ impl<T: Storage> Raft<T> {
                         }),
                     );
 
-                    let mut m_append = Message::default();
-                    m_append.to = forward.get_to();
-                    m_append.from = m.get_from();
-                    m_append.set_msg_type(MessageType::MsgAppend);
-                    m_append.index = forward.get_index();
-                    m_append.log_term = forward.get_log_term();
-                    m_append.set_entries(ents.unwrap().into());
-                    m_append.commit = m.get_commit();
-                    m_append.commit_term = m.get_commit_term();
-                    self.r.send(m_append, &mut self.msgs)
+                    match ents {
+                        Ok(ents) => {
+                            let mut m_append = Message::default();
+                            m_append.to = forward.get_to();
+                            m_append.from = m.get_from();
+                            m_append.set_msg_type(MessageType::MsgAppend);
+                            m_append.index = forward.get_index();
+                            m_append.log_term = forward.get_log_term();
+                            m_append.set_entries(ents.into());
+                            m_append.commit = m.get_commit();
+                            m_append.commit_term = m.get_commit_term();
+                            self.r.send(m_append, &mut self.msgs);
+                        }
+                        Err(_) => {
+                            // Tell leader to re-send this MsgAppend by leader replication.
+                            to_send.reject = true;
+                            let mut fwd = Forward::new();
+                            fwd.set_to(forward.get_to());
+                            fwd.set_index(forward.get_index());
+                            retry_forwards.push(fwd);
+                            warn!(
+                                self.logger,
+                                "The agent fails to fetch entries, index {} log term {} in forward message to peer {}.",
+                                forward.get_index(),
+                                forward.get_log_term(),
+                                forward.get_to()
+                            );
+                        }
+                    }
                 } else {
+                    // Tell leader to re-send this MsgAppend by leader replication.
+                    to_send.reject = true;
+                    let mut fwd = Forward::new();
+                    fwd.set_to(forward.get_to());
+                    fwd.set_index(forward.get_index());
+                    retry_forwards.push(fwd);
                     warn!(
                         self.logger,
                         "The agent's log does not match with index {} log term {} in forward message to peer {}.",
@@ -2606,11 +2631,6 @@ impl<T: Storage> Raft<T> {
                         forward.get_log_term(),
                         forward.get_to()
                     );
-                    to_send.reject = true;
-                    let mut fwd = Forward::new();
-                    fwd.set_to(forward.get_to());
-                    fwd.set_index(forward.get_index());
-                    retry_forwards.push(fwd);
                 }
             }
             to_send.set_forwards(retry_forwards.into());
@@ -2625,6 +2645,7 @@ impl<T: Storage> Raft<T> {
                 "index" => m.index,
                 "logterm" => ?self.raft_log.term(m.index),
             );
+            // Tell leader to re-send all these MsgAppend by leader replication..
             to_send.reject = true;
             for forward in m.get_forwards() {
                 let mut fwd = Forward::new();
