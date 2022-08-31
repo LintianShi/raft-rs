@@ -39,6 +39,10 @@ pub struct Progress {
     /// RecentActive can be reset to false after an election timeout.
     pub recent_active: bool,
 
+    /// This is true if the progress rejects MsgGroupBroadcast recently.
+    /// RecentForwardFail can be reset to false after an election timeout.
+    pub recent_forward_fail: bool,
+
     /// Inflights is a sliding window for the inflight messages.
     /// When inflights is full, no more message should be sent.
     /// When a leader sends out a message, the index of the last
@@ -66,6 +70,7 @@ impl Progress {
             pending_snapshot: 0,
             pending_request_snapshot: 0,
             recent_active: false,
+            recent_forward_fail: false,
             ins: Inflights::new(ins_size),
             commit_group_id: 0,
             committed_index: 0,
@@ -87,6 +92,7 @@ impl Progress {
         self.pending_snapshot = 0;
         self.pending_request_snapshot = INVALID_INDEX;
         self.recent_active = false;
+        self.recent_forward_fail = false;
         self.ins.reset();
     }
 
