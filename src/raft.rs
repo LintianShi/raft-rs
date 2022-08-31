@@ -18,8 +18,8 @@ use std::cmp;
 use std::ops::{Deref, DerefMut};
 
 use crate::eraftpb::{
-    ConfChange, ConfChangeV2, ConfState, Entry, EntryType, HardState, Message, MessageType,
-    Snapshot,
+    ConfChange, ConfChangeV2, ConfState, Entry, EntryType, Forward, HardState, Message,
+    MessageType, Snapshot,
 };
 use protobuf::Message as _;
 use raft_proto::ConfChangeI;
@@ -1820,6 +1820,27 @@ impl<T: Storage> Raft<T> {
         }
     }
 
+    fn handle_group_broadcast_response(&mut self, m: &Message) {
+        if m.reject {
+            // The agent failed to forward MsgAppend, so the leader re-sends it.
+            for forward in m.get_forwards() {
+                self.send_append(forward.get_to());
+            }
+            let pr = match self.prs.get_mut(m.from) {
+                Some(pr) => pr,
+                None => {
+                    debug!(
+                        self.logger,
+                        "no progress available for {}",
+                        m.from;
+                    );
+                    return;
+                }
+            };
+            pr.recent_forward_fail = true;
+        }
+    }
+
     fn handle_heartbeat_response(&mut self, m: &Message) {
         // Update the node. Drop the value explicitly since we'll check the qourum after.
         let pr = match self.prs.get_mut(m.from) {
@@ -2142,6 +2163,9 @@ impl<T: Storage> Raft<T> {
             MessageType::MsgAppendResponse => {
                 self.handle_append_response(&m);
             }
+            MessageType::MsgGroupBroadcastResponse => {
+                self.handle_group_broadcast_response(&m);
+            }
             MessageType::MsgHeartbeatResponse => {
                 self.handle_heartbeat_response(&m);
             }
@@ -2267,6 +2291,11 @@ impl<T: Storage> Raft<T> {
                 debug_assert_eq!(self.term, m.term);
                 self.become_follower(m.term, m.from);
                 self.handle_append_entries(&m);
+            }
+            MessageType::MsgGroupBroadcast => {
+                debug_assert_eq!(self.term, m.term);
+                self.become_follower(m.term, m.from);
+                self.handle_group_broadcast(&m);
             }
             MessageType::MsgHeartbeat => {
                 debug_assert_eq!(self.term, m.term);
@@ -2515,6 +2544,11 @@ impl<T: Storage> Raft<T> {
 
     // For a broadcast, append entries to onw log and forward MsgAppend to other dest.
     fn handle_group_broadcast(&mut self, m: &Message) {
+        let mut to_send = Message::default();
+        to_send.set_msg_type(MessageType::MsgGroupBroadcastResponse);
+        to_send.to = m.from;
+        to_send.reject = false;
+        let mut retry_forwards: Vec<Forward> = Vec::new();
         if self.try_append_entries(m) {
             // If the agent fails to append entries from the leader,
             // the agent cannot forward MsgAppend.
@@ -2552,8 +2586,13 @@ impl<T: Storage> Raft<T> {
                         forward.get_log_term(),
                         forward.get_to()
                     );
+                    to_send.reject = true;
+                    let mut fwd = Forward::new();
+                    fwd.set_to(forward.get_to());
+                    retry_forwards.push(fwd);
                 }
             }
+            to_send.set_forwards(retry_forwards.into());
         } else {
             debug!(
                 self.logger,
@@ -2565,7 +2604,15 @@ impl<T: Storage> Raft<T> {
                 "index" => m.index,
                 "logterm" => ?self.raft_log.term(m.index),
             );
+            to_send.reject = true;
+            for forward in m.get_forwards() {
+                let mut fwd = Forward::new();
+                fwd.set_to(forward.get_to());
+                retry_forwards.push(fwd);
+            }
+            to_send.set_forwards(retry_forwards.into());
         }
+        self.r.send(to_send, &mut self.msgs);
     }
 
     // TODO: revoke pub when there is a better way to test.
