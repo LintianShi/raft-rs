@@ -1824,6 +1824,12 @@ impl<T: Storage> Raft<T> {
         if m.reject {
             // The agent failed to forward MsgAppend, so the leader re-sends it.
             for forward in m.get_forwards() {
+                debug!(
+                    self.logger,
+                    "The agent's index is {} while target peer's index is {}",
+                    m.get_index(),
+                    forward.get_index();
+                );
                 self.send_append(forward.get_to());
             }
             let pr = match self.prs.get_mut(m.from) {
@@ -2547,6 +2553,7 @@ impl<T: Storage> Raft<T> {
         let mut to_send = Message::default();
         to_send.set_msg_type(MessageType::MsgGroupBroadcastResponse);
         to_send.to = m.from;
+        to_send.index = m.index;
         to_send.reject = false;
         let mut retry_forwards: Vec<Forward> = Vec::new();
         if self.try_append_entries(m) {
@@ -2589,6 +2596,7 @@ impl<T: Storage> Raft<T> {
                     to_send.reject = true;
                     let mut fwd = Forward::new();
                     fwd.set_to(forward.get_to());
+                    fwd.set_index(forward.get_index());
                     retry_forwards.push(fwd);
                 }
             }
@@ -2608,6 +2616,7 @@ impl<T: Storage> Raft<T> {
             for forward in m.get_forwards() {
                 let mut fwd = Forward::new();
                 fwd.set_to(forward.get_to());
+                fwd.set_index(forward.get_index());
                 retry_forwards.push(fwd);
             }
             to_send.set_forwards(retry_forwards.into());
