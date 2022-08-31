@@ -40,6 +40,10 @@ pub struct Config {
     /// leadership every heartbeat ticks.
     pub heartbeat_tick: usize,
 
+    /// ForwardResetTick is the number of node.tick invocations that must pass between
+    /// reset of recentForwardFail. That is, a leader resets recentForwardFail.
+    pub forward_reset_tick: usize,
+
     /// Applied is the last applied index. It should only be set when restarting
     /// raft. raft will not return entries to the application smaller or equal to Applied.
     /// If Applied is unset when restarting, raft might return previous applied entries.
@@ -111,6 +115,7 @@ impl Default for Config {
             id: 0,
             election_tick: HEARTBEAT_TICK * 10,
             heartbeat_tick: HEARTBEAT_TICK,
+            forward_reset_tick: HEARTBEAT_TICK * 3,
             applied: 0,
             max_size_per_msg: 0,
             max_inflight_msgs: 256,

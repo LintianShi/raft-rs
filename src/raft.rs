@@ -226,6 +226,10 @@ pub struct RaftCore<T: Storage> {
     /// only leader keeps heartbeatElapsed.
     heartbeat_elapsed: usize,
 
+    /// Number of ticks since it reached last forwardResetTimeout.
+    /// only leader keeps forwardResetElapsed.
+    forward_reset_elapsed: usize,
+
     /// Whether to check the quorum
     pub check_quorum: bool,
 
@@ -248,6 +252,7 @@ pub struct RaftCore<T: Storage> {
 
     heartbeat_timeout: usize,
     election_timeout: usize,
+    forward_reset_timeout: usize,
 
     // randomized_election_timeout is a random number between
     // [min_election_timeout, max_election_timeout - 1]. It gets reset
@@ -348,6 +353,7 @@ impl<T: Storage> Raft<T> {
                 read_only: ReadOnly::new(c.read_only_option),
                 heartbeat_timeout: c.heartbeat_tick,
                 election_timeout: c.election_tick,
+                forward_reset_timeout: c.forward_reset_tick,
                 leader_id: Default::default(),
                 lead_transferee: None,
                 term: Default::default(),
@@ -355,6 +361,7 @@ impl<T: Storage> Raft<T> {
                 pending_conf_index: Default::default(),
                 vote: Default::default(),
                 heartbeat_elapsed: Default::default(),
+                forward_reset_elapsed: Default::default(),
                 randomized_election_timeout: Default::default(),
                 min_election_timeout: c.min_election_tick(),
                 max_election_timeout: c.max_election_tick(),
@@ -1091,6 +1098,7 @@ impl<T: Storage> Raft<T> {
     fn tick_heartbeat(&mut self) -> bool {
         self.heartbeat_elapsed += 1;
         self.election_elapsed += 1;
+        self.forward_reset_elapsed += 1;
 
         let mut has_ready = false;
         if self.election_elapsed >= self.election_timeout {
@@ -1107,6 +1115,11 @@ impl<T: Storage> Raft<T> {
 
         if self.state != StateRole::Leader {
             return has_ready;
+        }
+
+        if self.forward_reset_elapsed >= self.forward_reset_timeout {
+            self.forward_reset_elapsed = 0;
+            self.reset_recent_forward_fail();
         }
 
         if self.heartbeat_elapsed >= self.heartbeat_timeout {
@@ -3019,5 +3032,19 @@ impl<T: Storage> Raft<T> {
         if let Some(pr) = self.mut_prs().get_mut(target) {
             pr.ins.set_cap(cap);
         }
+    }
+
+    fn reset_recent_forward_fail(&mut self) {
+        for (_, pr) in self.prs.iter_mut() {
+            pr.recent_forward_fail = false;
+        }
+    }
+
+    /// Query whether this progress fails to forward messages recently.
+    pub fn is_recent_forward_fail(&self, id: u64) -> bool {
+        if let Some(pr) = self.prs().get(id) {
+            return pr.recent_forward_fail;
+        }
+        false
     }
 }

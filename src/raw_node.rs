@@ -792,6 +792,12 @@ impl<T: Storage> RawNode<T> {
     pub fn set_batch_append(&mut self, batch_append: bool) {
         self.raft.set_batch_append(batch_append)
     }
+
+    /// Query whether this progress fails to forward messages recently.
+    #[inline]
+    pub fn is_recent_forward_fail(&self, id: u64) -> bool {
+        self.raft.is_recent_forward_fail(id)
+    }
 }
 
 #[cfg(test)]
