@@ -18,8 +18,8 @@ use std::cmp;
 use std::ops::{Deref, DerefMut};
 
 use crate::eraftpb::{
-    ConfChange, ConfChangeV2, ConfState, Entry, EntryType, Forward, HardState, Message,
-    MessageType, Snapshot,
+    ConfChange, ConfChangeV2, ConfState, Entry, EntryType, HardState, Message, MessageType,
+    Snapshot,
 };
 use protobuf::Message as _;
 use raft_proto::ConfChangeI;
@@ -1824,13 +1824,12 @@ impl<T: Storage> Raft<T> {
         if m.reject {
             // The agent failed to forward MsgAppend, so the leader re-sends it.
             for forward in m.get_forwards() {
-                debug!(
+                info!(
                     self.logger,
                     "The agent's index is {} while target peer's index is {}",
                     m.get_index(),
                     forward.get_index();
                 );
-                self.send_append(forward.get_to());
             }
             let pr = match self.prs.get_mut(m.from) {
                 Some(pr) => pr,
@@ -2550,12 +2549,6 @@ impl<T: Storage> Raft<T> {
 
     // For a broadcast, append entries to onw log and forward MsgAppend to other dest.
     fn handle_group_broadcast(&mut self, m: &Message) {
-        let mut to_send = Message::default();
-        to_send.set_msg_type(MessageType::MsgGroupBroadcastResponse);
-        to_send.to = m.from;
-        to_send.index = m.index;
-        to_send.reject = false;
-        let mut retry_forwards: Vec<Forward> = Vec::new();
         if self.try_append_entries(m) {
             // If the agent fails to append entries from the leader,
             // the agent cannot forward MsgAppend.
@@ -2589,12 +2582,6 @@ impl<T: Storage> Raft<T> {
                             self.r.send(m_append, &mut self.msgs);
                         }
                         Err(_) => {
-                            // Tell leader to re-send this MsgAppend by leader replication.
-                            to_send.reject = true;
-                            let mut fwd = Forward::new();
-                            fwd.set_to(forward.get_to());
-                            fwd.set_index(forward.get_index());
-                            retry_forwards.push(fwd);
                             warn!(
                                 self.logger,
                                 "The agent fails to fetch entries, index {} log term {} in forward message to peer {}.",
@@ -2605,12 +2592,6 @@ impl<T: Storage> Raft<T> {
                         }
                     }
                 } else {
-                    // Tell leader to re-send this MsgAppend by leader replication.
-                    to_send.reject = true;
-                    let mut fwd = Forward::new();
-                    fwd.set_to(forward.get_to());
-                    fwd.set_index(forward.get_index());
-                    retry_forwards.push(fwd);
                     warn!(
                         self.logger,
                         "The agent's log does not match with index {} log term {} in forward message to peer {}.",
@@ -2620,9 +2601,8 @@ impl<T: Storage> Raft<T> {
                     );
                 }
             }
-            to_send.set_forwards(retry_forwards.into());
         } else {
-            debug!(
+            info!(
                 self.logger,
                 "The agent rejects append [logterm: {msg_log_term}, index: {msg_index}] \
                 from {from}",
@@ -2632,17 +2612,7 @@ impl<T: Storage> Raft<T> {
                 "index" => m.index,
                 "logterm" => ?self.raft_log.term(m.index),
             );
-            // Tell leader to re-send all these MsgAppend by leader replication..
-            to_send.reject = true;
-            for forward in m.get_forwards() {
-                let mut fwd = Forward::new();
-                fwd.set_to(forward.get_to());
-                fwd.set_index(forward.get_index());
-                retry_forwards.push(fwd);
-            }
-            to_send.set_forwards(retry_forwards.into());
         }
-        self.r.send(to_send, &mut self.msgs);
     }
 
     // TODO: revoke pub when there is a better way to test.
