@@ -799,6 +799,12 @@ impl<T: Storage> RawNode<T> {
         self.raft.is_recent_forward_fail(id)
     }
 
+    /// Get the last_idx of this peer.
+    #[inline]
+    pub fn last_idx(&self) -> u64 {
+        self.raft.raft_log.last_index()
+    }
+
     /// Whether this RawNode is active recently.
     #[inline]
     pub fn is_recent_active(&self, id: u64) -> bool {
