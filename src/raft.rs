@@ -18,8 +18,8 @@ use std::cmp;
 use std::ops::{Deref, DerefMut};
 
 use crate::eraftpb::{
-    ConfChange, ConfChangeV2, ConfState, Entry, EntryType, HardState, Message, MessageType,
-    Snapshot,
+    ConfChange, ConfChangeV2, ConfState, Entry, EntryType, Forward, HardState, Message,
+    MessageType, Snapshot,
 };
 use protobuf::Message as _;
 use raft_proto::ConfChangeI;
@@ -2595,6 +2595,7 @@ impl<T: Storage> Raft<T> {
                             self.r.send(m_append, &mut self.msgs);
                         }
                         Err(_) => {
+                            self.send_reserved_log_entry(m, forward);
                             warn!(
                                 self.logger,
                                 "The agent fails to fetch entries, index {} log term {} in forward message to peer {}.",
@@ -2605,6 +2606,7 @@ impl<T: Storage> Raft<T> {
                         }
                     }
                 } else {
+                    self.send_reserved_log_entry(m, forward);
                     warn!(
                         self.logger,
                         "The agent's log does not match with index {} log term {} in forward message to peer {}.",
@@ -2615,6 +2617,9 @@ impl<T: Storage> Raft<T> {
                 }
             }
         } else {
+            for forward in m.get_forwards() {
+                self.send_reserved_log_entry(m, forward);
+            }
             info!(
                 self.logger,
                 "The agent rejects append [logterm: {msg_log_term}, index: {msg_index}] \
@@ -2955,6 +2960,32 @@ impl<T: Storage> Raft<T> {
     /// Stops the transfer of a leader.
     pub fn abort_leader_transfer(&mut self) {
         self.lead_transferee = None;
+    }
+
+    fn send_reserved_log_entry(&mut self, m: &Message, forward: &Forward) {
+        let mut forward_entries = Vec::with_capacity(1);
+        if forward.has_entry() {
+            forward_entries.push(forward.get_entry().clone());
+        }
+        let mut m_append = Message::default();
+        m_append.to = forward.get_to();
+        m_append.from = m.get_from();
+        m_append.set_msg_type(MessageType::MsgAppend);
+        m_append.index = forward.get_index();
+        m_append.log_term = forward.get_log_term();
+        m_append.set_entries(forward_entries.into());
+        m_append.commit = m.get_commit();
+        m_append.commit_term = m.get_commit_term();
+
+        info!(
+            self.logger,
+            "The agent forwards reserved log entry [logterm: {msg_log_term}, index: {msg_index}] \
+            to peer {id}",
+            msg_log_term = forward.log_term,
+            msg_index = forward.index,
+            id = forward.to;
+        );
+        self.r.send(m_append, &mut self.msgs);
     }
 
     fn send_request_snapshot(&mut self) {

@@ -55,6 +55,8 @@ message Forward {
     uint64 to = 1;
     uint64 log_term = 2;
     uint64 index = 3;
+    // Reserve at least one entry. When the agent fails to forward, the agent just send it.
+    Entry entry = 4;
 }
 
 enum MessageType {
