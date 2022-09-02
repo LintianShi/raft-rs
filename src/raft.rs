@@ -2963,23 +2963,18 @@ impl<T: Storage> Raft<T> {
     }
 
     fn send_reserved_log_entry(&mut self, m: &Message, forward: &Forward) {
-        let mut forward_entries = Vec::with_capacity(1);
-        if forward.has_entry() {
-            forward_entries.push(forward.get_entry().clone());
-        }
         let mut m_append = Message::default();
         m_append.to = forward.get_to();
         m_append.from = m.get_from();
         m_append.set_msg_type(MessageType::MsgAppend);
         m_append.index = forward.get_index();
         m_append.log_term = forward.get_log_term();
-        m_append.set_entries(forward_entries.into());
         m_append.commit = m.get_commit();
         m_append.commit_term = m.get_commit_term();
 
         info!(
             self.logger,
-            "The agent forwards reserved log entry [logterm: {msg_log_term}, index: {msg_index}] \
+            "The agent forwards reserved empty log entry [logterm: {msg_log_term}, index: {msg_index}] \
             to peer {id}",
             msg_log_term = forward.log_term,
             msg_index = forward.index,
